@@ -30,6 +30,11 @@ jobs:
           VITE_AMAP_KEY: ${{ secrets.VITE_AMAP_KEY }}
         run: npm run build -- --base=/cesium-3d-spatial-analysis/
 
+      # vite-plugin-cesium 注入的 script/link 标签不自动带 base 前缀，
+      # 构建后手动把 /cesium/ 替换为完整子路径
+      - name: Fix Cesium paths for subdirectory
+        run: sed -i 's|/cesium/|/cesium-3d-spatial-analysis/cesium/|g' dist/index.html
+
       - name: Deploy to gh-pages
         uses: peaceiris/actions-gh-pages@v3
         with:
