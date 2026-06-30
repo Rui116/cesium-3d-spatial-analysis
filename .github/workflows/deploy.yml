@@ -28,7 +28,13 @@ jobs:
       - name: Build
         env:
           VITE_AMAP_KEY: ${{ secrets.VITE_AMAP_KEY }}
-        run: npm run build -- --base=/cesium-3d-spatial-analysis/
+          BASE: /cesium-3d-spatial-analysis/
+        run: npm run build
+
+      # vite-plugin-cesium 在自定义 base 时不复制 Cesium 静态文件，
+      # 需手动从 node_modules 复制
+      - name: Copy Cesium static files
+        run: cp -r node_modules/cesium/Build/Cesium dist/
 
       - name: Deploy to gh-pages
         uses: peaceiris/actions-gh-pages@v3

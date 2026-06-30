@@ -3,6 +3,8 @@ import vue from '@vitejs/plugin-vue'
 import cesium from 'vite-plugin-cesium'
 
 export default defineConfig({
+  // GitHub Pages 部署时通过环境变量 BASE 指定子路径，默认 '/' 用于本地开发
+  base: process.env.BASE || '/',
   plugins: [
     vue(),
     cesium(),
