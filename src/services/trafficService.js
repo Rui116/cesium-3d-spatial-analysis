@@ -3,7 +3,7 @@ import { CoordinateConverter } from '@composables/useCoordinate'
 /* ---- 配置 ---- */
 const TRAFFIC_API      = 'https://restapi.amap.com/v3/traffic/status/rectangle'
 const TRAFFIC_ROAD_API = 'https://restapi.amap.com/v3/traffic/status/road'
-const AMAP_KEY = import.meta.env.VITE_AMAP_KEY || 'c8a477afca7961ba820499ccc193d2ad'
+const AMAP_KEY = import.meta.env.VITE_AMAP_KEY
 const AMAP_JSCode = import.meta.env.VITE_AMAP_JSCode || ''
 const MAX_DIAGONAL_M = 10_000   // 高德限制：矩形对角线 ≤ 10 km
 const MAX_RETRY = 2

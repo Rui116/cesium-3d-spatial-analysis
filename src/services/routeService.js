@@ -1,6 +1,6 @@
 import { CoordinateConverter } from '@composables/useCoordinate'
 
-const AMAP_KEY = import.meta.env.VITE_AMAP_KEY || 'c8a477afca7961ba820499ccc193d2ad'
+const AMAP_KEY = import.meta.env.VITE_AMAP_KEY
 const ROUTE_API = 'https://restapi.amap.com/v3/direction/driving'
 
 /* ---- 错误码映射 ---- */
