@@ -1,0 +1,306 @@
+/* ===========================================================
+   三维空间分析 — 设计系统
+   基于 Element Plus 暗色主题
+   =========================================================== */
+
+/* ---- 字体 ---------------------------------------------- */
+@import url('https://fonts.googleapis.com/css2?family=Rajdhani:wght@500;600;700&family=Noto+Sans+SC:wght@400;500;700&family=JetBrains+Mono:wght@400;500&display=swap');
+
+/* ---- 设计令牌 -------------------------------------- */
+:root {
+  --void-deep:   #060b14;
+  --void-mid:    #0c1524;
+  --void-surface:#111c2e;
+  --void-raised: #162437;
+
+  --hud-cyan:       #00e5ff;
+  --hud-cyan-dim:   rgba(0, 229, 255, 0.15);
+  --hud-amber:      #ffab00;
+  --hud-green:      #00e676;
+  --hud-red:        #ff5252;
+
+  --font-display: 'Rajdhani', 'Noto Sans SC', sans-serif;
+  --font-body:    'Noto Sans SC', system-ui, sans-serif;
+  --font-mono:    'JetBrains Mono', 'Consolas', monospace;
+
+  --radius-sm: 4px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+
+  --glass-bg:     rgba(12, 21, 36, 0.88);
+  --glass-border: rgba(0, 229, 255, 0.10);
+  --glass-blur:   14px;
+  --panel-shadow: 0 8px 32px rgba(0,0,0,0.55), inset 0 1px 0 rgba(0,229,255,0.06);
+}
+
+/* ---- Element Plus 暗色主题覆写 ---------------- */
+:root {
+  --el-color-primary:       var(--hud-cyan);
+  --el-color-primary-light-3: #33eaff;
+  --el-color-primary-light-5: #66efff;
+  --el-color-primary-light-7: #99f4ff;
+  --el-color-primary-light-8: #b3f7ff;
+  --el-color-primary-light-9: #ccfaff;
+  --el-color-primary-dark-2:  #00b8d4;
+  --el-color-success:        var(--hud-green);
+  --el-color-warning:        var(--hud-amber);
+  --el-color-danger:         var(--hud-red);
+  --el-border-radius-base:   var(--radius-sm);
+  --el-font-family:          var(--font-body);
+  --el-bg-color:             var(--void-mid);
+  --el-bg-color-overlay:     var(--void-raised);
+  --el-fill-color-blank:     rgba(0,0,0,0.25);
+  --el-border-color:         rgba(0,229,255,0.12);
+  --el-border-color-light:   rgba(0,229,255,0.08);
+  --el-border-color-lighter: rgba(0,229,255,0.05);
+  --el-text-color-primary:   #c8d6e4;
+  --el-text-color-regular:   #8899aa;
+  --el-text-color-secondary: #62758a;
+  --el-text-color-placeholder:#4a5a6a;
+}
+
+/* ---- 样式重置 ---------------------------------------------- */
+*, *::before, *::after { box-sizing: border-box; margin:0; padding:0; }
+
+html, body {
+  width:100%; height:100%; overflow:hidden;
+  font-family: var(--font-body);
+  font-size:13px; font-weight:400;
+  color:#b8c5d6;
+  background: var(--void-deep);
+  -webkit-font-smoothing: antialiased;
+}
+
+#app { width:100%; height:100%; }
+
+/* ---- 氛围背景纹理 ----------------------------- */
+body::before {
+  content:''; position:fixed; inset:0; z-index:9999; pointer-events:none;
+  background:
+    repeating-linear-gradient(0deg,transparent,transparent 1px,rgba(0,229,255,0.012) 1px,rgba(0,229,255,0.012) 2px),
+    repeating-linear-gradient(90deg,transparent,transparent 1px,rgba(0,229,255,0.012) 1px,rgba(0,229,255,0.012) 2px);
+  opacity:0.6;
+}
+body::after {
+  content:''; position:fixed; inset:0; z-index:10000; pointer-events:none;
+  background:url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.04'/%3E%3C/svg%3E");
+  opacity:0.7;
+}
+
+/* ---- 滚动条自定义 ----------------------------------------- */
+::-webkit-scrollbar { width:4px; }
+::-webkit-scrollbar-track { background:transparent; }
+::-webkit-scrollbar-thumb { background:rgba(0,229,255,0.12); border-radius:2px; }
+::-webkit-scrollbar-thumb:hover { background:rgba(0,229,255,0.25); }
+
+/* ============================================================
+   自定义组件（航天气质，Element Plus 未覆盖的样式）
+   ============================================================ */
+
+/* ---- 玻璃面板 ---------------------------------------- */
+.glass-panel {
+  pointer-events:auto;
+  background:var(--glass-bg);
+  backdrop-filter:blur(var(--glass-blur));
+  -webkit-backdrop-filter:blur(var(--glass-blur));
+  border:1px solid var(--glass-border);
+  border-radius:var(--radius-lg);
+  box-shadow:var(--panel-shadow);
+  color:#b8c5d6;
+}
+.glass-panel .panel-header {
+  display:flex; align-items:center; gap:10px;
+  padding:14px 16px;
+  border-bottom:1px solid rgba(0,229,255,0.08);
+  font-family:var(--font-display);
+  font-size:15px; font-weight:600; letter-spacing:1.2px;
+  color:#e0eaf6; text-transform:uppercase;
+}
+.glass-panel .panel-header .panel-icon { font-size:18px; }
+.glass-panel .panel-body {
+  padding:14px 16px;
+  display:flex; flex-direction:column; gap:14px;
+}
+
+/* 面板折叠/展开按钮 */
+.glass-panel .panel-header .collapse-btn {
+  margin-left: auto;
+  width: 22px; height: 22px;
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 3px;
+  background: transparent;
+  color: #556878;
+  font-size: 12px; font-weight: 700;
+  cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  transition: all 0.2s;
+  flex-shrink: 0;
+  line-height: 1;
+  padding: 0;
+  font-family: var(--font-mono);
+}
+.glass-panel .panel-header .collapse-btn:hover {
+  border-color: rgba(0, 229, 255, 0.35);
+  color: var(--hud-cyan);
+}
+
+/* 面板折叠状态 */
+.glass-panel.collapsed .panel-body { display: none; }
+.glass-panel.collapsed .panel-header { border-bottom: none; }
+
+/* ---- HUD 分区标签 --------------------------------- */
+.hud-label {
+  display:flex; align-items:center; gap:8px;
+  font-family:var(--font-display);
+  font-size:11px; font-weight:600; letter-spacing:1.8px;
+  color:#62758a; text-transform:uppercase;
+  margin-bottom:4px;
+}
+.hud-label::after {
+  content:''; flex:1; height:1px;
+  background:linear-gradient(90deg,rgba(0,229,255,0.35),transparent);
+}
+.hud-label .label-value {
+  color:var(--hud-cyan);
+  font-family:var(--font-mono);
+  letter-spacing:0; text-transform:none; font-size:11px;
+}
+
+/* ---- 坐标叠加层 --------------------------------- */
+.coord-overlay {
+  pointer-events:auto;
+  position:absolute; bottom:20px; right:20px; z-index:900;
+  background:rgba(6,11,20,0.85);
+  backdrop-filter:blur(10px);
+  border:1px solid rgba(0,229,255,0.10);
+  border-radius:var(--radius-md);
+  padding:12px 16px; min-width:260px;
+  font-family:var(--font-mono); font-size:11px;
+  box-shadow:0 4px 24px rgba(0,0,0,0.50);
+}
+.coord-overlay .coord-item {
+  display:flex; gap:8px; padding:3px 0;
+  border-bottom:1px solid rgba(255,255,255,0.04);
+}
+.coord-overlay .coord-item:last-child { border-bottom:none; }
+.coord-overlay .coord-label {
+  color:var(--hud-cyan); font-weight:500; min-width:55px;
+}
+.coord-overlay .coord-value { color:#8899aa; }
+
+/* ---- 分区线 ----------------------------------- */
+.section-divider {
+  height:1px;
+  background:linear-gradient(90deg,transparent,rgba(0,229,255,0.12),transparent);
+  margin:2px 0;
+}
+
+/* ---- 统计卡片（自定义样式保留） ---------------- */
+.stat-card-custom {
+  background:rgba(0,0,0,0.25);
+  border:1px solid rgba(0,229,255,0.08);
+  border-radius:var(--radius-md);
+  padding:12px 14px; text-align:center;
+}
+.stat-card-custom .stat-value {
+  font-family:var(--font-display); font-size:22px; font-weight:700;
+  color:var(--hud-cyan); letter-spacing:0.5px;
+}
+.stat-card-custom .stat-label {
+  font-family:var(--font-display); font-size:10px; letter-spacing:1.5px;
+  color:#62758a; text-transform:uppercase; margin-top:2px;
+}
+
+/* ---- 图例行 ---------------------------------------- */
+.legend-row {
+  display:flex; align-items:center; gap:8px; flex-wrap:wrap;
+  padding-top:6px;
+  font-family:var(--font-mono); font-size:10px; color:#62758a;
+}
+.legend-dot { width:8px; height:8px; border-radius:2px; flex-shrink:0; }
+
+/* ---- Cesium UI 覆写 ---------------------------------- */
+.cesium-viewer-bottom { display:none!important; }
+.cesium-viewer-toolbar { top:14px!important; right:14px!important; }
+
+/* ---- Element Plus 细节微调 -------------------------- */
+/* 面板内紧凑选择器和输入框 */
+.glass-panel .el-select { width:100%; }
+.glass-panel .el-input__inner { font-family:var(--font-mono); font-size:12px; }
+.glass-panel .el-button { font-family:var(--font-display); letter-spacing:0.5px; font-size:12px; }
+
+/* ---- 面板按钮宽度归一化 ----
+   问题：el-button 的 `display: inline-flex` 阻止了 width:100% 的可靠生效。
+   方案：切换到 `display: flex`（块级 flex），使 100% 宽度能填满父容器。
+   按钮组内的按钮使用 flex:1 替代。
+   --------------------------------------------------------------- */
+
+/* ① 字段组：拉伸至全宽并拉伸子元素 */
+.field-group {
+  width: 100%;
+  align-items: stretch;
+}
+
+/* ② 面板内所有独立按钮：块级 flex 使 width:100% 生效 */
+.glass-panel .panel-body .el-button {
+  display: flex;
+  width: 100%;
+  margin-left: 0;
+  margin-right: 0;
+}
+
+/* ③ 例外：按钮组子元素保持 inline-flex + 使用 flex:1 */
+.glass-panel .el-button-group {
+  width: 100%;
+}
+.glass-panel .el-button-group .el-button {
+  display: inline-flex;
+  width: auto;
+  flex: 1 1 0%;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  margin-left: 0;
+  margin-right: 0;
+}
+
+/* ④ 例外：.btn-row-equal 子元素使用 flex:1 */
+.glass-panel .btn-row-equal {
+  display: flex; gap: 6px;
+}
+.glass-panel .btn-row-equal .el-button {
+  display: inline-flex;
+  width: auto;
+  flex: 1;
+  min-width: 0;
+}
+.glass-panel .el-slider__bar { background-color:var(--hud-cyan); }
+.glass-panel .el-slider__button {
+  border-color:var(--hud-cyan);
+  box-shadow:0 0 8px rgba(0,229,255,0.30);
+}
+
+/* 侧边栏菜单细节微调 */
+.mcs-sidebar .el-menu { border-right:none!important; background:transparent!important; }
+.mcs-sidebar .el-menu-item {
+  font-family:var(--font-display); font-size:13px; letter-spacing:0.6px;
+  color:#6b7d90!important; height:40px; line-height:40px;
+  border-radius:6px; margin:1px 4px;
+}
+.mcs-sidebar .el-menu-item:hover { background:rgba(0,229,255,0.06)!important; color:#b0c8dd!important; }
+.mcs-sidebar .el-menu-item.is-active {
+  background:linear-gradient(135deg,rgba(0,229,255,0.10),rgba(0,180,220,0.04))!important;
+  color:var(--hud-cyan)!important;
+  border-left:2px solid var(--hud-cyan);
+}
+
+/* ---- 动画关键帧 ---------------------------------------- */
+@keyframes pulse-glow {
+  0%,100% { box-shadow:0 0 8px rgba(0,229,255,0.15); }
+  50%     { box-shadow:0 0 20px rgba(0,229,255,0.35); }
+}
+@keyframes fade-in-up {
+  from { opacity:0; transform:translateY(8px); }
+  to   { opacity:1; transform:translateY(0); }
+}
