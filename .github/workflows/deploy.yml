@@ -32,9 +32,11 @@ jobs:
         run: npm run build
 
       # vite-plugin-cesium 在自定义 base 时不复制 Cesium 静态文件，
-      # 需手动从 node_modules 复制
+      # 需手动从 node_modules 复制（显式指定小写 cesium 目录名，
+      # 与 vite-plugin-cesium transformIndexHtml 注入的 URL 路径一致，
+      # 否则 Linux 区分大小写会导致 404）
       - name: Copy Cesium static files
-        run: cp -r node_modules/cesium/Build/Cesium dist/
+        run: cp -r node_modules/cesium/Build/Cesium dist/cesium
 
       - name: Deploy to gh-pages
         uses: peaceiris/actions-gh-pages@v3
