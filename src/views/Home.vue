@@ -305,6 +305,7 @@ function removeGeoJson() {
   if (cachedGeoJsonDS && v.dataSources.contains(cachedGeoJsonDS)) {
     v.dataSources.remove(cachedGeoJsonDS, true)
   }
+  cachedGeoJsonDS = null
   geoJsonLoaded.value = false
 }
 

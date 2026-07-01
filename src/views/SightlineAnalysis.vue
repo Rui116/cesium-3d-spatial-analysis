@@ -5,17 +5,17 @@
       <div class="panel-body">
         <div class="field-group">
           <label class="hud-label">采样密度<span class="label-value">{{ sampleCount }} 点</span></label>
-          <el-slider v-model="sampleCount" :min="50" :max="500" size="small" show-input :show-input-controls="false" />
+          <el-slider v-model="sampleCount" :min="50" :max="500" size="small" />
         </div>
 
         <div class="field-group" style="margin-top:8px">
           <label class="hud-label">观察点离地高度<span class="label-value">{{ observerAGL }} m</span></label>
-          <el-slider v-model="observerAGL" :min="0" :max="500" :step="1" size="small" show-input :show-input-controls="false" />
+          <el-slider v-model="observerAGL" :min="0" :max="500" :step="1" size="small" />
         </div>
 
         <div class="field-group">
           <label class="hud-label">目标点离地高度<span class="label-value">{{ targetAGL }} m</span></label>
-          <el-slider v-model="targetAGL" :min="0" :max="500" :step="1" size="small" show-input :show-input-controls="false" />
+          <el-slider v-model="targetAGL" :min="0" :max="500" :step="1" size="small" />
         </div>
 
         <el-button size="small" :type="isAnalyzing?'warning':'primary'" @click="toggleAnalysis">
