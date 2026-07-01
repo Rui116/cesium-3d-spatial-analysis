@@ -121,11 +121,6 @@ VITE_AMAP_JSCode=your-amap-js-code
 | [docs/buffer-analysis.md](docs/buffer-analysis.md) | 缓冲区分析实现说明 |
 | [docs/route-planning.md](docs/route-planning.md) | 路径规划分析实现说明 |
 | [docs/traffic-visualization.md](docs/traffic-visualization.md) | 交通态势可视化实现说明 |
-| [docs/cesium-3dtiles-问题排查与修复.md](docs/cesium-3dtiles-问题排查与修复.md) | 3D Tiles 加载问题排查 |
-| [docs/GeoJSON加载应用-问题与方案.md](docs/GeoJSON加载应用-问题与方案.md) | GeoJSON 加载方案记录 |
-| [docs/UI按钮宽度一致性修复.md](docs/UI按钮宽度一致性修复.md) | UI 按钮样式修复 |
-| [docs/视角切换功能优化.md](docs/视角切换功能优化.md) | 视角切换功能优化记录 |
-| [docs/问题修复与优化总结.md](docs/问题修复与优化总结.md) | 整体问题修复与优化总结 |
 
 ---
 

@@ -3,3 +3,6 @@ dist/
 .env
 *.local
 .DS_Store
+.npm-temp-cache/
+skills-lock.json
+.agents/

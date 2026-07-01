@@ -158,10 +158,6 @@ onUnmounted(() => clearInterval(clockTimer))
   font-family: var(--font-display); font-size: 16px; font-weight: 700;
   letter-spacing: 2px; color: #e0eaf6; line-height: 1.1;
 }
-.brand-subtitle {
-  font-family: var(--font-body); font-size: 10px; font-weight: 500;
-  letter-spacing: 1px; color: #62758a; line-height: 1.2;
-}
 
 .sidebar-ctrl {
   margin-left: auto; flex-shrink: 0;
