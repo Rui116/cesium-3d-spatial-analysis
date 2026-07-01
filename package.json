@@ -11,6 +11,8 @@
     "test:watch": "vitest"
   },
   "dependencies": {
+    "@turf/buffer": "^7.3.5",
+    "@turf/helpers": "^7.3.5",
     "cesium": "1.142.0",
     "element-plus": "^2.14.1",
     "pinia": "^2.2.6",

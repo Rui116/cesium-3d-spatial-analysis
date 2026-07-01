@@ -6,8 +6,8 @@
         <div class="field-group">
           <label class="hud-label">缓冲类型</label>
           <el-button-group style="width:100%">
-            <el-button size="small" :type="bufferType==='point'?'primary':'default'" @click="startPointBuffer" style="flex:1">点缓冲</el-button>
-            <el-button size="small" :type="bufferType==='line'?'primary':'default'" @click="startLineBuffer" style="flex:1">线缓冲</el-button>
+            <el-button size="small" :type="bufferType==='point'?'primary':'default'" @click="startPointBuffer" style="flex:1">{{ bufferType === 'point' ? '⊗ 点缓冲' : '点缓冲' }}</el-button>
+            <el-button size="small" :type="bufferType==='line'?'primary':'default'" @click="startLineBuffer" style="flex:1">{{ bufferType === 'line' ? '⊗ 线缓冲' : '线缓冲' }}</el-button>
           </el-button-group>
         </div>
         <div class="field-group">
@@ -30,11 +30,13 @@ import { ElMessage } from 'element-plus'
 import * as Cesium from 'cesium'
 import { useViewer } from '@composables/useCesium'
 import { cesiumHelpers } from '@utils/cesiumHelpers'
+import { lineString } from '@turf/helpers'
+import { buffer as turfBuffer } from '@turf/buffer'
 
 const { viewer } = useViewer()
 
 const panelCollapsed = ref(false)
-const bufferType = ref('point')
+const bufferType = ref(null)
 const bufferRadius = ref(1000)
 const statusText = ref('请选择分析类型')
 const statusType = ref('info')
@@ -44,7 +46,7 @@ let activeHandler = null
 let lineEntity = null             // 单一线实体，每次更新而非新建
 let bDS = null
 let trackedEntities = []          // viewer 上的实体引用，精确清理
-let keydownBound = false
+let lineKeydownHandler = null
 
 function getDS() {
   if (!bDS) {
@@ -75,12 +77,15 @@ function resetState() {
   }
 
   // 清理线实体引用
-  lineEntity = null
+  if (lineEntity) {
+    try { viewer.value?.entities.remove(lineEntity) } catch (_) { /* ok */ }
+    lineEntity = null
+  }
 
   // 清理键盘监听
-  if (keydownBound) {
-    document.removeEventListener('keydown', finishLine)
-    keydownBound = false
+  if (lineKeydownHandler) {
+    document.removeEventListener('keydown', lineKeydownHandler)
+    lineKeydownHandler = null
   }
 
   drawingPts.value = 0
@@ -88,6 +93,7 @@ function resetState() {
 
 function resetAll() {
   resetState()
+  bufferType.value = null
   setStatus('请选择分析类型', 'info')
 }
 
@@ -95,6 +101,12 @@ function resetAll() {
 
 function startPointBuffer() {
   const v = viewer.value; if (!v) return
+  if (bufferType.value === 'point') {
+    resetState()
+    bufferType.value = null
+    setStatus('请选择分析类型', 'info')
+    return
+  }
   resetState()
   bufferType.value = 'point'
   setStatus('在地图上点击选择位置', 'info')
@@ -139,8 +151,18 @@ function createPtBuf(position, radius) {
   ds.entities.add({
     polygon: {
       hierarchy: Cesium.Cartesian3.fromDegreesArray(coords),
-      material: Cesium.Color.fromCssColorString('#00e5ff').withAlpha(0.45),
+      material: Cesium.Color.fromCssColorString('#00e5ff').withAlpha(0.35),
       classificationType: Cesium.ClassificationType.TERRAIN,
+    },
+  })
+
+  // 边界线（TERRAIN polygon 不支持 outline）
+  ds.entities.add({
+    polyline: {
+      positions: Cesium.Cartesian3.fromDegreesArray(coords),
+      material: Cesium.Color.fromCssColorString('#00e5ff'),
+      width: 2,
+      clampToGround: true,
     },
   })
 
@@ -157,6 +179,12 @@ function createPtBuf(position, radius) {
 
 function startLineBuffer() {
   const v = viewer.value; if (!v) return
+  if (bufferType.value === 'line') {
+    resetState()
+    bufferType.value = null
+    setStatus('请选择分析类型', 'info')
+    return
+  }
   resetState()
   bufferType.value = 'line'
   setStatus('点击地图添加端点，按 Enter 完成绘制', 'info')
@@ -186,20 +214,20 @@ function startLineBuffer() {
   }, Cesium.ScreenSpaceEventType.LEFT_CLICK)
 
   // 键盘监听
-  document.addEventListener('keydown', function handler(e) {
+  lineKeydownHandler = function handler(e) {
     if (e.key === 'Enter' && pts.length >= 2) {
       document.removeEventListener('keydown', handler)
-      keydownBound = false
+      lineKeydownHandler = null
       finishLineFromPts(pts)
     }
     if (e.key === 'Escape') {
       document.removeEventListener('keydown', handler)
-      keydownBound = false
+      lineKeydownHandler = null
       resetState()
       setStatus('取消绘制', 'info')
     }
-  })
-  keydownBound = true
+  }
+  document.addEventListener('keydown', lineKeydownHandler)
 }
 
 function finishLineFromPts(pts) {
@@ -227,98 +255,38 @@ function createLineBuf(positions, radius) {
   const ds = getDS()
   ds.entities.removeAll()
 
-  // 将所有顶点转为经纬度
-  const pts = positions.map(p => {
+  // 顶点 → GeoJSON 坐标
+  const coords = positions.map(p => {
     const c = Cesium.Cartographic.fromCartesian(p)
-    return { lon: Cesium.Math.toDegrees(c.longitude), lat: Cesium.Math.toDegrees(c.latitude) }
+    return [Cesium.Math.toDegrees(c.longitude), Cesium.Math.toDegrees(c.latitude)]
   })
+  if (coords.length < 2) return
 
-  // 标准 GIS 线缓冲算法：线段平移 + 拐角斜接 + 端头圆帽
-  const left = []   // 左侧偏移线（沿行进方向左转 90°）
-  const right = []  // 右侧偏移线
+  // Turf.js 标准 GIS 缓冲（round join + round cap，单位米）
+  const line = lineString(coords)
+  const buffered = turfBuffer(line, radius, { units: 'meters' })
 
-  for (let i = 0; i < pts.length; i++) {
-    const { lon, lat } = pts[i]
-    const cosLat = Math.cos(Cesium.Math.toRadians(lat)) || 0.001
-    const dxM = 1 / (111_320 * cosLat)  // 1m 对应多少经度
-    const dyM = 1 / 111_320              // 1m 对应多少纬度
+  // GeoJSON 多边形坐标 → Cesium Cartesian3 数组
+  const ring = buffered.geometry.coordinates[0]
+  const positions3D = Cesium.Cartesian3.fromDegreesArray(ring.flat())
 
-    // 该顶点处的方向角（取前一段或后一段的方向）
-    let angle
-    if (i === 0 && pts.length > 1) {
-      // 起点：使用第一段的方向
-      angle = Math.atan2(pts[1].lat - lat, (pts[1].lon - lon) * cosLat)
-    } else if (i === pts.length - 1 && i > 0) {
-      // 终点：使用最后一段的方向
-      angle = Math.atan2(lat - pts[i - 1].lat, (lon - pts[i - 1].lon) * cosLat)
-    } else {
-      // 中间点：使用前后段方向的平均值
-      const a1 = Math.atan2(lat - pts[i - 1].lat, (lon - pts[i - 1].lon) * cosLat)
-      const a2 = Math.atan2(pts[i + 1].lat - lat, (pts[i + 1].lon - lon) * cosLat)
-      let da = a2 - a1
-      if (da > Math.PI) da -= 2 * Math.PI
-      if (da < -Math.PI) da += 2 * Math.PI
-      angle = a1 + da / 2
-    }
-
-    // 左/右垂直方向
-    const la = angle + Math.PI / 2  // 左侧
-    const ra = angle - Math.PI / 2  // 右侧
-
-    left.push({
-      lon: lon + (radius * Math.cos(la)) * dxM,
-      lat: lat + (radius * Math.sin(la)) * dyM,
-    })
-    right.push({
-      lon: lon + (radius * Math.cos(ra)) * dxM,
-      lat: lat + (radius * Math.sin(ra)) * dyM,
-    })
-  }
-
-  // 起点圆帽（半圆，连接 left[0] 和 right[0]）
-  const capStart = []
-  if (pts.length > 1) {
-    const a0 = Math.atan2(pts[1].lat - pts[0].lat, (pts[1].lon - pts[0].lon) * Math.cos(Cesium.Math.toRadians(pts[0].lat)))
-    const cosLat0 = Math.cos(Cesium.Math.toRadians(pts[0].lat)) || 0.001
-    const dxM0 = 1 / (111_320 * cosLat0)
-    const dyM0 = 1 / 111_320
-    const capSegs = 16
-    for (let j = 0; j <= capSegs; j++) {
-      const a = a0 + Math.PI / 2 + (j / capSegs) * Math.PI
-      capStart.push({
-        lon: pts[0].lon + (radius * Math.cos(a)) * dxM0,
-        lat: pts[0].lat + (radius * Math.sin(a)) * dyM0,
-      })
-    }
-  }
-
-  // 终点圆帽（半圆，连接 right 末 → left 末）
-  const capEnd = []
-  if (pts.length > 1) {
-    const n = pts.length - 1
-    const aN = Math.atan2(pts[n].lat - pts[n - 1].lat, (pts[n].lon - pts[n - 1].lon) * Math.cos(Cesium.Math.toRadians(pts[n].lat)))
-    const cosLatN = Math.cos(Cesium.Math.toRadians(pts[n].lat)) || 0.001
-    const dxMN = 1 / (111_320 * cosLatN)
-    const dyMN = 1 / 111_320
-    const capSegs = 16
-    for (let j = 0; j <= capSegs; j++) {
-      const a = aN - Math.PI / 2 + (j / capSegs) * Math.PI
-      capEnd.push({
-        lon: pts[n].lon + (radius * Math.cos(a)) * dxMN,
-        lat: pts[n].lat + (radius * Math.sin(a)) * dyMN,
-      })
-    }
-  }
-
-  // 组装多边形：起点帽 → 左侧 → 终点帽 → 右侧（逆序）
-  const polyPts = [...capStart, ...left, ...capEnd, ...right.reverse()]
-  const coords = polyPts.flatMap(p => [p.lon, p.lat])
-
+  // 缓冲面
   ds.entities.add({
     polygon: {
-      hierarchy: Cesium.Cartesian3.fromDegreesArray(coords),
-      material: Cesium.Color.fromCssColorString('#00e5ff').withAlpha(0.35),
+      hierarchy: positions3D,
+      material: Cesium.Color.fromCssColorString('#00e5ff').withAlpha(0.30),
       classificationType: Cesium.ClassificationType.TERRAIN,
+    },
+  })
+
+  // 边界线
+  const outline3D = Cesium.Cartesian3.fromDegreesArray([...ring.flat(), ring[0][0], ring[0][1]])
+  ds.entities.add({
+    polyline: {
+      positions: outline3D,
+      material: Cesium.Color.fromCssColorString('#00e5ff'),
+      width: 2,
+      clampToGround: true,
     },
   })
 
