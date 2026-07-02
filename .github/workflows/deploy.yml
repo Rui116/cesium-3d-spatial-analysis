@@ -29,6 +29,7 @@ jobs:
 
       - name: Build
         env:
+          VITE_CESIUM_TOKEN: ${{ secrets.VITE_CESIUM_TOKEN }}
           VITE_AMAP_KEY: ${{ secrets.VITE_AMAP_KEY }}
           BASE: /cesium-3d-spatial-analysis/
         run: npm run build

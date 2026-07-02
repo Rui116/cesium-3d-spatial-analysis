@@ -91,22 +91,24 @@ src/
 
 ## API 配置
 
-### Cesium Ion Token
+### API Key 配置
 
-在 `src/composables/useCesium.js` 中配置：
-```js
-const CESIUM_TOKEN = 'your-cesium-ion-token'
+复制 `.env.example` 为 `.env`，填入你的 API Key：
+
+```bash
+cp .env.example .env
 ```
 
-### 高德地图 API Key
-
-在项目根目录 `.env` 文件中配置（优先级高于源码默认值）：
 ```env
+# Cesium Ion Token — 前往 https://ion.cesium.com/tokens 创建
+VITE_CESIUM_TOKEN=your-cesium-ion-token
+
+# 高德地图 Web 服务 API Key — 前往 https://console.amap.com/ 申请
 VITE_AMAP_KEY=your-amap-web-service-key
 VITE_AMAP_JSCode=your-amap-js-code
 ```
 
-源码中的服务类（`src/services/`）会优先读取环境变量，未配置时使用内置的默认 Key。
+> `.env` 已在 `.gitignore` 中，不会提交到仓库。
 
 ---
 

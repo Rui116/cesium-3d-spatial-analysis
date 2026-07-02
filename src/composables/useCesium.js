@@ -3,7 +3,11 @@ import * as Cesium from 'cesium'
 import { useViewerStore } from '@stores/viewer'
 import { storeToRefs } from 'pinia'
 
-const CESIUM_TOKEN = 'REPLACED_CESIUM_TOKEN''
+const CESIUM_TOKEN = import.meta.env.VITE_CESIUM_TOKEN || ''
+
+if (!CESIUM_TOKEN) {
+  console.warn('[Cesium] ⚠ VITE_CESIUM_TOKEN 未配置，Cesium Ion 影像/地形服务将不可用。请在 .env 文件中设置。')
+}
 
 /** Cesium Viewer 默认配置（关闭不需要的 UI 控件） */
 const DEFAULT_VIEWER_OPTS = {
