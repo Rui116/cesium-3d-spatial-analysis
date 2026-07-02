@@ -106,7 +106,7 @@ export function useTerrain() {
           })
           break
         case 'arcgis':
-          // ArcGIS 全球高程服务
+          // ArcGIS 全球高程服务（无需 Cesium Ion Token）
           console.log('[地形] 创建 ArcGIS 地形')
           provider = await Cesium.ArcGISTiledElevationTerrainProvider.fromUrl(
             'https://elevation3d.arcgis.com/arcgis/rest/services/WorldElevation3D/Terrain3D/ImageServer'
@@ -124,7 +124,13 @@ export function useTerrain() {
 
       if (!provider) { console.error('[地形] provider 创建失败'); return false }
 
+      // ---- 防御：地形热切换时暂停 globe 渲染，避免 TileAvailability 空指针 ----
+      v.scene.globe.show = false
       v.terrainProvider = provider
+      // 等待一帧让内部状态重建
+      await new Promise(r => requestAnimationFrame(r))
+      v.scene.globe.show = true
+
       console.log(`[地形] 切换 "${type}" 完成`)
       return true
     } catch (err) {

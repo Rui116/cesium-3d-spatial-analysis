@@ -42,11 +42,14 @@
 
         <div class="field-group">
           <label class="hud-label">数据加载</label>
-          <el-button size="small" :type="gltfLoaded ? 'danger' : 'primary'" :loading="loadingAsset === 'gltf'" @click="toggleGltf">
-            {{ gltfLoaded ? '✈ 移除飞机模型' : '✈ 飞机模型 (glTF)' }}
+          <el-button size="small" :type="gltfLoaded ? 'danger' : 'primary'" :loading="loadingAsset === 'gltf' && gltfProgress < 100" @click="toggleGltf">
+            {{ gltfBtnText }}
           </el-button>
-          <el-button size="small" type="primary" :loading="loadingAsset === 'tiles'" @click="load3DTiles" style="margin-top:4px">
-            ⌂ 三维瓦片 (3D Tiles)
+          <div v-if="loadingAsset === 'gltf' && gltfProgress > 0 && gltfProgress < 100" class="progress-hint">
+            {{ gltfProgress === -1 ? '解析模型中…' : `下载模型 ${gltfProgress}%` }}
+          </div>
+          <el-button size="small" :type="tilesLoaded ? 'danger' : 'primary'" :loading="loadingAsset === 'tiles'" @click="toggle3DTiles" style="margin-top:4px">
+            {{ tilesLoaded ? '⌂ 移除三维瓦片' : '⌂ 三维瓦片 (3D Tiles)' }}
           </el-button>
           <el-button size="small" :type="geoJsonLoaded ? 'danger' : 'primary'" :loading="loadingAsset === 'geojson'" @click="toggleGeoJson" style="margin-top:4px">
             {{ geoJsonLoaded ? '◈ 移除行政区划' : '◈ 武汉市行政区划 (GeoJSON)' }}
@@ -87,7 +90,7 @@
 </template>
 
 <script setup>
-import { ref, watch, onMounted, onUnmounted } from 'vue'
+import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import * as Cesium from 'cesium'
 import { useViewer } from '@composables/useCesium'
@@ -116,8 +119,20 @@ const heightVisualActive = ref(false)
 const loadingAsset = ref(null)
 const processing = ref(null)
 const gltfLoaded = ref(false)
-let gltfEntity = null
+const gltfProgress = ref(0)     // 下载进度：0-100，-1=解析中
+let gltfPrimitive = null        // viewer.entities 中的模型 entity 引用
+const tilesLoaded = ref(false)  // 3D Tiles 是否已加载
+let tilesetPrimitive = null     // scene.primitives 中的 tileset 引用
 const terrainLabel = ref('无')
+
+const gltfBtnText = computed(() => {
+  if (loadingAsset.value === 'gltf') {
+    if (gltfProgress.value === -1) return '解析模型中…'
+    if (gltfProgress.value > 0 && gltfProgress.value < 100) return `下载中 ${gltfProgress.value}%`
+    return '加载中…'
+  }
+  return gltfLoaded.value ? '✈ 移除飞机模型' : '✈ 飞机模型 (glTF)'
+})
 
 let screenHandler = null
 let cachedGeoJsonDS = null
@@ -210,59 +225,213 @@ const FOV_DEFAULT = 60
 function resetFov() { fov.value = FOV_DEFAULT; onFovChange(FOV_DEFAULT) }
 
 /* ---- glTF 模型 ---- */
+
+/** 移除 glTF 模型并清理相关资源 */
 function removeGltf() {
   const v = viewer.value
-  if (gltfEntity) { try { v.entities.remove(gltfEntity) } catch (_) {}; gltfEntity = null }
+  if (gltfPrimitive) {
+    try { v?.entities?.remove(gltfPrimitive) } catch (_) { /* ok */ }
+    gltfPrimitive = null
+  }
   gltfLoaded.value = false
+  gltfProgress.value = 0
 }
 
+/**
+ * glTF 模型加载（优化版）。
+ *
+ * 相比原始版本的改进：
+ *   1. 地形感知高度 — 采样放置点地形高度，避免模型沉入地下
+ *   2. 离地高度自适应 — 地形越高，模型离地越远（max(300, 地形高×5%)）
+ *   3. 加载进度反馈 — 按钮文字实时显示加载状态
+ *   4. 失败自动重试 — 首次失败后等待 1.5s 重试一次
+ *   5. 优雅降级   — 地形采样失败 → 退化为固定高度；全部失败 → 友好报错
+ */
 async function toggleGltf() {
   if (!_checkViewer() || loadingAsset.value) return
-  if (gltfLoaded.value) { removeGltf(); ElMessage.info('飞机模型已移除'); return }
+
+  // 已加载 → 移除
+  if (gltfLoaded.value) {
+    removeGltf()
+    ElMessage.info('飞机模型已移除')
+    return
+  }
+
   loadingAsset.value = 'gltf'
-  try {
-    const v = viewer.value
-    const center = new Cesium.Cartesian2(v.canvas.clientWidth / 2, v.canvas.clientHeight / 2)
-    const ray = v.camera.getPickRay(center)
-    const lookAt = v.scene.globe.pick(ray, v.scene)
-    const carto = lookAt ? Cesium.Cartographic.fromCartesian(lookAt) : v.camera.positionCartographic
-    const modelPos = Cesium.Cartesian3.fromRadians(carto.longitude, carto.latitude, carto.height + 300)
-    gltfEntity = v.entities.add({ name: 'Cesium 飞机', position: modelPos, model: { uri: './CesiumAir/Cesium_Air.glb', scale: 20 } })
-    gltfLoaded.value = true
-    v.flyTo(gltfEntity, { duration: 1.5, offset: new Cesium.HeadingPitchRange(0, Cesium.Math.toRadians(-30), 800) })
-    ElMessage.success('飞机模型已加载')
-  } catch (err) {
-    ElMessage.error('模型加载失败：' + (err.message || '未知错误'))
-  } finally { loadingAsset.value = null }
+  gltfProgress.value = 0
+
+  const MODEL_URL = './CesiumAir/Cesium_Air.glb'
+  const MAX_RETRIES = 1
+
+  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+    try {
+      const v = viewer.value
+
+      // ---- 1. 计算放置位置 ----
+      const center = new Cesium.Cartesian2(v.canvas.clientWidth / 2, v.canvas.clientHeight / 2)
+      const ray = v.camera.getPickRay(center)
+      const lookAt = v.scene.globe.pick(ray, v.scene)
+      const carto = lookAt
+        ? Cesium.Cartographic.fromCartesian(lookAt)
+        : v.camera.positionCartographic
+
+      // ---- 2. 地形感知：采样放置点地形高度 ----
+      gltfProgress.value = 10
+      let terrainH = 0
+      const tp = v.terrainProvider
+      if (!(tp instanceof Cesium.EllipsoidTerrainProvider)) {
+        try {
+          const [sampled] = await Cesium.sampleTerrainMostDetailed(tp, [
+            new Cesium.Cartographic(carto.longitude, carto.latitude, 0),
+          ])
+          terrainH = sampled?.height || 0
+        } catch { /* 降级：采样失败使用椭球面高度 */ }
+      }
+
+      // 相机相对地形的高度（用于离地偏移 + 动态缩放计算）
+      const camCarto = v.camera.positionCartographic
+      const camAltitude = Math.max(0, (camCarto?.height || 0) - (terrainH || carto.height || 0))
+
+      // 离地高度 = 相机高度的 3%，确保从当前视角清晰可见
+      // 下限 300m（低空看山），上限 20000m（太空视角）
+      const aboveGround = Cesium.Math.clamp(camAltitude * 0.03, 300, 20000)
+      const modelHeight = Math.max(terrainH, carto.height || 0) + aboveGround
+
+      // ---- 3. 创建模型 Entity ----
+      gltfProgress.value = 50
+      const modelPos = Cesium.Cartesian3.fromRadians(carto.longitude, carto.latitude, modelHeight)
+
+      // 动态缩放：用开方曲线替代线性增长，低空不炸、高空可见
+      //  500m → scale 20   2km → scale 40   10km → scale 89   50km → scale 200
+      const dynamicScale = Cesium.Math.clamp(
+        20.0 * Math.sqrt(Math.max(1, camAltitude / 500)),
+        20,   // 最低缩放（贴地视角）
+        200,  // 最高缩放（太空视角）
+      )
+
+      gltfPrimitive = v.entities.add({
+        name: 'Cesium 飞机',
+        position: modelPos,
+        model: {
+          uri: MODEL_URL,
+          scale: dynamicScale,
+          minimumPixelSize: 64,            // 高视角下保底至少 64px，不会小到看不见
+          maximumScale: 250,               // 近距离最大 250 倍
+          incrementallyLoadTextures: true,  // 渐进纹理（低清→高清）
+          shadows: Cesium.ShadowMode.ENABLED,
+        },
+      })
+
+      gltfProgress.value = 80
+      gltfLoaded.value = true
+
+      // ---- 4. 飞向模型（始终飞到近处，不受起始视角影响） ----
+      const camDist = Cesium.Cartesian3.distance(v.camera.position, modelPos)
+      // 目标观看距离：始终在 200~800m 内，高空视角也强制拉近
+      const targetDist = Cesium.Math.clamp(camAltitude * 0.05, 200, 800)
+      v.flyTo(gltfPrimitive, {
+        duration: Cesium.Math.clamp(camDist / 8000, 0.8, 3.5),
+        offset: new Cesium.HeadingPitchRange(0, Cesium.Math.toRadians(-25), targetDist),
+      })
+
+      gltfProgress.value = 100
+      ElMessage.success(`飞机模型已加载 · 离地 ${aboveGround.toFixed(0)}m`)
+      loadingAsset.value = null
+      return // 成功
+
+    } catch (err) {
+      console.error(`[glTF] 尝试 ${attempt + 1}/${MAX_RETRIES + 1}:`, err)
+      if (attempt < MAX_RETRIES) {
+        gltfProgress.value = 0
+        await new Promise(r => setTimeout(r, 1500))
+        continue
+      }
+      // 最终失败
+      ElMessage.error('模型加载失败：' + (err.message || '未知错误'))
+      removeGltf()
+    }
+  }
+
+  loadingAsset.value = null
+  gltfProgress.value = 0
 }
 
 /* ---- 3D Tiles ---- */
-async function load3DTiles() {
+
+/** 移除三维瓦片（从 scene.primitives 中安全移除并销毁） */
+function remove3DTiles() {
+  if (tilesetPrimitive) {
+    try {
+      viewer.value?.scene?.primitives?.remove(tilesetPrimitive)
+    } catch (_) { /* ok */ }
+    tilesetPrimitive = null
+  }
+  tilesLoaded.value = false
+}
+
+async function toggle3DTiles() {
   if (!_checkViewer() || loadingAsset.value) return
+
+  // 已加载 → 移除
+  if (tilesLoaded.value) {
+    remove3DTiles()
+    ElMessage.info('三维瓦片已移除')
+    return
+  }
+
   loadingAsset.value = 'tiles'
   try {
     const v = viewer.value
+
+    // ---- 1. 快速读取 metadata 获取目标位置（tileset.json 很小，几乎无延迟） ----
     const resp = await fetch('./Tileset/tileset.json')
     const meta = await resp.json()
     const region = meta.root?.boundingVolume?.region
     if (!region || region.length !== 6) { ElMessage.error('tileset.json 缺少有效的包围盒'); return }
     const [west, south, east, north, , maxH] = region
-    const centerLon = (west + east) / 2; const centerLat = (south + north) / 2
-    await v.camera.flyTo({
-      destination: Cesium.Cartesian3.fromRadians(centerLon, centerLat, Math.max(maxH + 30, 80)),
-      orientation: { heading: Cesium.Math.toRadians(30), pitch: Cesium.Math.toRadians(-70), roll: 0 },
-      duration: 2.0,
+    const centerLon = (west + east) / 2
+    const centerLat = (south + north) / 2
+
+    // ---- 2. 立即飞向目标区域（飞行过程约 1.5s，遮盖瓦片下载等待） ----
+    v.camera.flyTo({
+      destination: Cesium.Cartesian3.fromRadians(centerLon, centerLat, Math.max(maxH + 500, 200)),
+      orientation: { heading: Cesium.Math.toRadians(15), pitch: Cesium.Math.toRadians(-50), roll: 0 },
+      duration: 1.5,
     })
-    const tileset = await Cesium.Cesium3DTileset.fromUrl('./Tileset/tileset.json')
-    v.scene.primitives.add(tileset)
-    let loadCount = 0, failCount = 0
-    tileset.tileLoad.addEventListener(() => { loadCount++ })
-    tileset.tileFailed.addEventListener((err) => { failCount++; console.error('[3DTiles] fail:', err) })
-    if (!tileset._initialTilesLoaded) { await new Promise(r => { tileset.initialTilesLoaded.addEventListener(r) }) }
-    await new Promise(r => setTimeout(r, 1500))
+
+    // ---- 3. 飞行期间并行加载瓦片数据 ----
+    tilesetPrimitive = await Cesium.Cesium3DTileset.fromUrl('./Tileset/tileset.json')
+    tilesetPrimitive.tileFailed.addEventListener((err) => { console.error('[3DTiles] fail:', err) })
+
+    v.scene.primitives.add(tilesetPrimitive)
+    tilesLoaded.value = true
+
+    // ---- 4. 等首帧就绪 ----
+    await new Promise(r => {
+      if (tilesetPrimitive.ready) return setTimeout(r, 100)
+      tilesetPrimitive.initialTilesLoaded.addEventListener(r, { once: true })
+      setTimeout(r, 8000)
+    })
+
+    // ---- 5. 精确聚焦 boundingSphere ----
+    const bs = tilesetPrimitive.boundingSphere
+    if (bs) {
+      v.camera.flyToBoundingSphere(bs, {
+        offset: new Cesium.HeadingPitchRange(
+          Cesium.Math.toRadians(15),
+          Cesium.Math.toRadians(-35),
+          Math.max(bs.radius * 1.8, 50),
+        ),
+        duration: 1.0,
+      })
+    }
+
     ElMessage.success('三维瓦片已加载')
-  } catch (err) { console.error('[3DTiles]', err); ElMessage.error('瓦片加载失败：' + (err.message || '未知错误')) }
-  finally { loadingAsset.value = null }
+  } catch (err) {
+    console.error('[3DTiles]', err)
+    ElMessage.error('瓦片加载失败：' + (err.message || '未知错误'))
+    remove3DTiles()
+  } finally { loadingAsset.value = null }
 }
 
 /* ---- GeoJSON ---- */
@@ -302,8 +471,10 @@ function removeGeoJson() {
   const v = viewer.value
   if (!v) return
   removeBaseOverlay()
-  if (cachedGeoJsonDS && v.dataSources.contains(cachedGeoJsonDS)) {
-    v.dataSources.remove(cachedGeoJsonDS, true)
+  if (cachedGeoJsonDS) {
+    // 先清空 DataSource 内的所有 entity，再移除 DataSource
+    cachedGeoJsonDS.entities.removeAll()
+    try { v.dataSources.remove(cachedGeoJsonDS, true) } catch (_) { /* ok */ }
   }
   cachedGeoJsonDS = null
   geoJsonLoaded.value = false
@@ -558,11 +729,12 @@ onUnmounted(() => {
   stopWatch()
   cesiumHelpers.destroyHandler(screenHandler)
   removeGltf()
+  remove3DTiles()
+  removeGeoJson()
   const v = viewer.value
   if (v) {
     colorEntities.forEach(e => { try { v.entities.remove(e) } catch (_) {} })
     heightEntities.forEach(e => { try { v.entities.remove(e) } catch (_) {} })
-    baseOverlayEntities.forEach(e => { try { v.entities.remove(e) } catch (_) {} })
   }
 })
 </script>
