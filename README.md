@@ -12,7 +12,7 @@
 
 | 模块 | 路由 | 说明 |
 |------|------|------|
-| 基础三维场景 | `/` | 影像/地形切换、视角控制、glTF/3DTiles/GeoJSON 加载、分色渲染、高度可视化 |
+| 基础三维场景 | `/` | 影像/地形切换、视角控制、glTF/3DTiles/GeoJSON 加载、分色渲染、高度可视化、GCJ-02 ↔ WGS-84 坐标转换 |
 | 交通态势可视化 | `/traffic` | 高德实时路况、区域绘制、状态色渲染、定时刷新 |
 | 可视域分析 | `/viewshed` | 360° 射线采样、地形 LOS 计算、可见面积统计、JSON/GeoJSON/截图导出 |
 | 缓冲区分析 | `/buffer` | 点/线缓冲区生成、几何凸包计算、多边形可视化 |
@@ -30,6 +30,19 @@ npm run build    # 生产构建
 ```
 
 **环境要求**：Node.js ≥ 18
+
+---
+
+## AI 辅助开发
+
+本项目使用 **Claude Code** 辅助开发，覆盖以下环节：
+
+- 架构设计与技术方案评审
+- 空间分析算法验证与调试（Max-Slope 通视分析、360° 射线采样）
+- 代码审查与性能优化建议
+- 文档自动生成
+
+> 所有 AI 生成代码均经过人工 Review，确保逻辑正确性和代码风格一致性。
 
 ---
 
@@ -55,7 +68,9 @@ App.vue ── Cesium Viewer（单例，Pinia Store 共享）
 | 状态 | Pinia |
 | 三维引擎 | CesiumJS（npm + vite-plugin-cesium） |
 | 地图服务 | 高德 API（交通态势 + 路径规划） |
+| GIS 运算 | Turf.js（缓冲区几何计算） |
 | UI | Element Plus + 暗色主题 |
+| 测试 | Vitest + jsdom |
 
 ---
 
@@ -109,6 +124,18 @@ VITE_AMAP_JSCode=your-amap-js-code
 ```
 
 > `.env` 已在 `.gitignore` 中，不会提交到仓库。
+
+---
+
+## 部署
+
+项目通过 **GitHub Actions** 自动部署到 GitHub Pages：
+
+[👉 在线演示](https://Rui116.github.io/cesium-3d-spatial-analysis/)
+
+- 推送 `main` 分支自动触发构建与部署
+- 静态资源通过 `peaceiris/actions-gh-pages` 发布到 `gh-pages` 分支
+- API Key 通过 GitHub Secrets 注入，不暴露在源码中
 
 ---
 
