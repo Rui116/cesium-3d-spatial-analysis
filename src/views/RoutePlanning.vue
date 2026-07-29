@@ -45,14 +45,19 @@
 </template>
 
 <script setup>
-import { ref, onUnmounted } from 'vue'
+import { ref, computed, onUnmounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import * as Cesium from 'cesium'
 import { useViewer } from '@composables/useCesium'
+import { useViewerStore } from '@stores/viewer'
+import { storeToRefs } from 'pinia'
 import { RouteService } from '@services/routeService'
+import { CoordinateConverter } from '@composables/useCoordinate'
 import { cesiumHelpers } from '@utils/cesiumHelpers'
 
 const { viewer } = useViewer()
+const viewerStore = useViewerStore()
+const { imageryType } = storeToRefs(viewerStore)
 const routeService = new RouteService()
 
 const panelCollapsed = ref(false)
@@ -67,6 +72,11 @@ const computing = ref(false)
 let markers = []
 let routeEntity = null
 let pickHandler = null     // 独立 handler，不再用 viewer 默认的
+
+// 高德/腾讯影像底图使用 GCJ-02 坐标系，路线需要保留 GCJ-02 才能对齐道路
+const isGcj02Imagery = computed(() =>
+  imageryType.value === 'gaode' || imageryType.value === 'tencent',
+)
 
 function setStatus(m, t = 'info') { statusText.value = m; statusType.value = t }
 
@@ -116,11 +126,19 @@ function setFromInput(type) {
 }
 
 function setStartPt(lng, lat) {
-  startPoint.value = [lng, lat]
+  // GCJ-02 影像底图：Cesium pickPosition 返回的 WGS-84 坐标实际对应
+  // 底图上 GCJ-02 位置的道路。routeService 始终做 WGS-84→GCJ-02 转换，
+  // 因此用 gcj02ToWgs84 预抵消，避免二次转换导致 API 收到错误坐标。
+  startPoint.value = isGcj02Imagery.value
+    ? CoordinateConverter.gcj02ToWgs84(lng, lat)
+    : [lng, lat]
+  // 标记始终使用原始拾取值（已与影像底图视觉对齐，无需转换）
   updateMarker('start', [lng, lat], '起点', cesiumHelpers.COLORS.CYAN)
 }
 function setEndPt(lng, lat) {
-  endPoint.value = [lng, lat]
+  endPoint.value = isGcj02Imagery.value
+    ? CoordinateConverter.gcj02ToWgs84(lng, lat)
+    : [lng, lat]
   updateMarker('end', [lng, lat], '终点', cesiumHelpers.COLORS.AMBER)
 }
 
@@ -142,7 +160,9 @@ async function calculateRoute() {
   setStatus('正在计算路径…', 'warning')
   try {
     // 路线始终转为 WGS-84，与 marker 同一坐标系，确保相连
-    const route = await routeService.fetchDrivingRoute(startPoint.value, endPoint.value)
+    const route = await routeService.fetchDrivingRoute(startPoint.value, endPoint.value, {
+      keepGcj02: isGcj02Imagery.value,  // GCJ-02 影像底图保留 GCJ-02 坐标以对齐道路
+    })
     routeResult.value = route
 
     if (routeEntity) v.entities.remove(routeEntity)

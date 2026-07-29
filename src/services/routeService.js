@@ -18,11 +18,13 @@ class RouteAPIError extends Error {
     super(message)
     this.name = 'RouteAPIError'
     this.code = code
+    this.status = code  // 与 TrafficAPIError 保持一致，便于上层统一判断
   }
 }
 
 export class RouteService {
   #controller = null
+  #cancelled = false    // 区分用户取消 vs 超时
 
   constructor(apiKey = AMAP_KEY) {
     this.apiKey = apiKey
@@ -30,7 +32,11 @@ export class RouteService {
     this.maxRetry = 2
   }
 
-  cancel() { this.#controller?.abort(); this.#controller = null }
+  cancel() {
+    this.#cancelled = true
+    this.#controller?.abort()
+    this.#controller = null
+  }
 
   /**
    * 获取驾车路径（含重试）。
@@ -40,6 +46,7 @@ export class RouteService {
    */
   async fetchDrivingRoute(origin, destination, opts = {}) {
     this.cancel()
+    this.#cancelled = false   // 新请求重置取消标记
 
     // WGS-84 → GCJ-02（高德 API 要求 GCJ-02）
     const [oGcjLng, oGcjLat] = CoordinateConverter.wgs84ToGcj02(origin[0], origin[1])
@@ -63,7 +70,8 @@ export class RouteService {
     let lastErr
     for (let attempt = 0; attempt <= this.maxRetry; attempt++) {
       this.#controller = new AbortController()
-      const tid = setTimeout(() => this.#controller.abort(), this.timeout)
+      let timedOut = false
+      const tid = setTimeout(() => { timedOut = true; this.#controller.abort() }, this.timeout)
 
       try {
         const res = await fetch(url, { signal: this.#controller.signal })
@@ -82,8 +90,22 @@ export class RouteService {
       } catch (err) {
         clearTimeout(tid)
         lastErr = err
-        if (err.name === 'AbortError') throw new RouteAPIError('请求已取消')
-        if (err instanceof RouteAPIError && err.status && err.status >= 400 && err.status < 500) throw err
+
+        // 用户主动取消 → 原样抛出 AbortError，上层静默处理
+        if (err.name === 'AbortError' && this.#cancelled) throw err
+
+        // 超时 → 可重试
+        if (err.name === 'AbortError' && timedOut) {
+          if (attempt < this.maxRetry) {
+            await new Promise(r => setTimeout(r, 1000 * (attempt + 1)))
+            continue
+          }
+          throw new RouteAPIError('请求超时，请检查网络后重试')
+        }
+
+        // 4xx 客户端错误 → 不重试，立即抛出
+        if (err instanceof RouteAPIError && err.code && err.code >= 400 && err.code < 500) throw err
+
         if (attempt === this.maxRetry) break
         await new Promise(r => setTimeout(r, 1000 * (attempt + 1)))
       }
@@ -107,15 +129,18 @@ export class RouteService {
         road: step.road || '',
         distance: parseFloat(step.distance) || 0,
         duration: parseFloat(step.duration) || 0,
-        polyline: (step.polyline || '').split(';').map(p => {
-          const [lng, lat] = p.split(',').map(Number)
-          if (isNaN(lng) || isNaN(lat)) return [0, 0]
-          if (convert) {
-            const [wgsLng, wgsLat] = CoordinateConverter.gcj02ToWgs84(lng, lat)
-            return [wgsLng, wgsLat]
-          }
-          return [lng, lat]
-        }),
+        polyline: (step.polyline || '').split(';')
+          .filter(p => p.includes(','))           // 过滤空字符串，避免产生 (0,0) 飞线
+          .map(p => {
+            const [lng, lat] = p.split(',').map(Number)
+            if (isNaN(lng) || isNaN(lat)) return null
+            if (convert) {
+              const [wgsLng, wgsLat] = CoordinateConverter.gcj02ToWgs84(lng, lat)
+              return [wgsLng, wgsLat]
+            }
+            return [lng, lat]
+          })
+          .filter(Boolean),
       })),
     }
   }
