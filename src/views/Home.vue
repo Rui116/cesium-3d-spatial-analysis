@@ -165,6 +165,79 @@ function _checkViewer() {
   return true
 }
 
+/* ---- 高度可视化辅助 ---- */
+const SAMPLE_COUNT = 40 // 每区目标采样点数
+
+/**
+ * 在多边形内部生成空间均匀的采样点（bbox 网格撒点 + 射线法过滤区外点）。
+ * 相比从顶点均匀抽点，能覆盖区域内部，避免采样点堆在边界拐角。
+ * @param {Cesium.Cartesian3[]} positions 多边形顶点（椭球面高度）
+ * @param {number} targetCount 目标内部点数
+ * @returns {{lon:number, lat:number}[]} 经纬度（弧度）采样点
+ */
+function samplePointsInPolygon(positions, targetCount = SAMPLE_COUNT) {
+  const cartos = positions.map(p => Cesium.Cartographic.fromCartesian(p))
+  const lons = cartos.map(c => c.longitude)
+  const lats = cartos.map(c => c.latitude)
+  const minLon = Math.min(...lons), maxLon = Math.max(...lons)
+  const minLat = Math.min(...lats), maxLat = Math.max(...lats)
+
+  // 退化保护：bbox 过小（几乎是一条线/点）时直接退回顶点
+  if (maxLon - minLon < 1e-7 || maxLat - minLat < 1e-7) {
+    return cartos.map(c => ({ lon: c.longitude, lat: c.latitude }))
+  }
+
+  // 网格密度：bbox 内撒约 targetCount*2 个点，过滤后约剩一半在内部
+  const gridN = Math.max(2, Math.ceil(Math.sqrt(targetCount * 2)))
+  const lonStep = (maxLon - minLon) / gridN
+  const latStep = (maxLat - minLat) / gridN
+
+  const points = []
+  for (let i = 0; i <= gridN; i++) {
+    for (let j = 0; j <= gridN; j++) {
+      const lon = minLon + i * lonStep
+      const lat = minLat + j * latStep
+      if (pointInPolygon(lon, lat, lons, lats)) {
+        points.push({ lon, lat })
+      }
+    }
+  }
+  return points
+}
+
+/**
+ * 射线法（even-odd）判断点是否在多边形内，坐标用经纬度（弧度）。
+ * 武汉范围很小，经纬度平面近似误差可忽略。
+ * 注意：Cesium 1.142 已移除 PolygonPipeline.pointInsidePolygon，故自实现。
+ */
+function pointInPolygon(lon, lat, lons, lats) {
+  let inside = false
+  for (let i = 0, j = lons.length - 1; i < lons.length; j = i++) {
+    const xi = lons[i], yi = lats[i]
+    const xj = lons[j], yj = lats[j]
+    const intersects = ((yi > lat) !== (yj > lat)) &&
+      (lon < (xj - xi) * (lat - yi) / (yj - yi) + xi)
+    if (intersects) inside = !inside
+  }
+  return inside
+}
+
+/**
+ * 批量采样地形高程（异步，不阻塞 UI）；失败时返回全 undefined，由调用方降级。
+ * @param {Cesium.TerrainProvider} provider
+ * @param {{lon:number, lat:number}[]} points 经纬度（弧度）
+ * @returns {Promise<Cesium.Cartographic[]>}
+ */
+async function sampleTerrainSafely(provider, points) {
+  try {
+    const cartos = points.map(p => new Cesium.Cartographic(p.lon, p.lat, 0))
+    return await Cesium.sampleTerrainMostDetailed(provider, cartos)
+  } catch (err) {
+    console.warn('[高度可视化] 地形采样失败，降级处理', err)
+    return points.map(() => ({ height: undefined }))
+  }
+}
+
 /* ---- 影像 / 地形 ---- */
 async function onImageryChange() {
   const ok = await switchImagery(imageryType.value)
@@ -238,9 +311,8 @@ function removeGltf() {
 }
 
 /**
- * glTF 模型加载（优化版）。
+ * glTF 模型加载
  *
- * 相比原始版本的改进：
  *   1. 地形感知高度 — 采样放置点地形高度，避免模型沉入地下
  *   2. 离地高度自适应 — 地形越高，模型离地越远（max(300, 地形高×5%)）
  *   3. 加载进度反馈 — 按钮文字实时显示加载状态
@@ -600,56 +672,57 @@ async function toggleHeightVisual() {
     removeBaseOverlay()
 
     const polyEntities = ds.entities.values.filter(e => e.polygon)
-    const total = polyEntities.length
 
-    // 阶段 1：收集采样点（每区 25 点）
-    progressLabel.value = '收集采样点…'
-    const allPoints = []
-    const districts = []
+    // 阶段 1：空间均匀采样（bbox 网格 + 射线法过滤），按区名合并飞地（MultiPolygon 拆出的多个 polygon）
+    progressLabel.value = '空间均匀采样…'
+    const districtMap = new Map()
     for (const entity of polyEntities) {
       const hierarchy = entity.polygon.hierarchy.getValue(Cesium.JulianDate.now())
       if (!hierarchy) continue
       const positions = hierarchy.hierarchy ? hierarchy.hierarchy.positions : hierarchy.positions
       if (!positions || !positions.length) continue
-      const step = Math.max(1, Math.ceil(positions.length / 10))
-      for (let i = 0; i < positions.length; i += step) {
-        const c = Cesium.Cartographic.fromCartesian(positions[i])
-        allPoints.push({ lon: c.longitude, lat: c.latitude, idx: districts.length })
+      const name = entity.name || '未知'
+      const adcode = entity.properties?.adcode?.getValue()
+      const center = entity.properties?.center?.getValue()
+      const points = samplePointsInPolygon(positions, SAMPLE_COUNT)
+      if (!districtMap.has(name)) {
+        districtMap.set(name, { name, adcode, center, rings: [], points: [], heights: [] })
       }
-      districts.push({ name: entity.name || '未知', positions, heights: [], adcode: entity.properties?.adcode?.getValue() })
+      const d = districtMap.get(name)
+      d.rings.push(positions)   // 每个飞地一个外环
+      d.points.push(...points)  // 合并飞地的采样点
     }
+    const districts = Array.from(districtMap.values())
 
-    // 阶段 2：获取高程（缓存 → 快速读 → ArcGIS 专用采样）
+    // 阶段 2：批量采样高程（缓存 → 当前地形 sampleTerrainMostDetailed → ArcGIS 兜底）
     if (cachedDistrictHeights) {
       progressLabel.value = '使用缓存高程…'
       for (const d of districts) {
         d.heights = [cachedDistrictHeights[d.name] ?? NaN]
       }
     } else {
-      progressLabel.value = `正在读取 ${allPoints.length} 个高程点…`
-      const globe = v.scene.globe
-      for (const pt of allPoints) {
-        const h = globe.getHeight(Cesium.Cartographic.fromRadians(pt.lon, pt.lat))
-        districts[pt.idx].heights.push(h ?? NaN)
-      }
-      const hitRate = districts.filter(d => d.heights.some(h => !isNaN(h))).length / districts.length
+      const allPoints = districts.flatMap((d, idx) => d.points.map(p => ({ ...p, idx })))
+      progressLabel.value = `正在批量采样 ${allPoints.length} 个高程点…`
+      let sampled = await sampleTerrainSafely(v.terrainProvider, allPoints)
+      // 命中率低（地形未就绪 / provider 不支持）→ 降级到 ArcGIS 独立 provider
+      const hitRate = allPoints.filter((_, i) => sampled[i] && isFinite(sampled[i].height)).length / allPoints.length
       if (hitRate < 0.8) {
-        // ArcGIS：viewer terrain 的 sampleTerrainMostDetailed 会卡死 → 用独立 provider
         progressLabel.value = 'ArcGIS 地形采样中（首次较慢）…'
         if (!cachedSampleProvider) {
           cachedSampleProvider = await Cesium.ArcGISTiledElevationTerrainProvider.fromUrl(
             'https://elevation3d.arcgis.com/arcgis/rest/services/WorldElevation3D/Terrain3D/ImageServer'
           )
         }
-        const cartoPoints = allPoints.map(p => new Cesium.Cartographic(p.lon, p.lat, 0))
-        const sampled = await Cesium.sampleTerrainMostDetailed(cachedSampleProvider, cartoPoints)
-        for (let i = 0; i < allPoints.length; i++) {
-          districts[allPoints[i].idx].heights = [sampled[i].height]
-        }
+        sampled = await sampleTerrainSafely(cachedSampleProvider, allPoints)
+      }
+      // 按区汇总（push，保留每个采样点的高程以计算平均值）
+      for (let i = 0; i < allPoints.length; i++) {
+        const h = sampled[i]?.height
+        if (h != null && isFinite(h)) districts[allPoints[i].idx].heights.push(h)
       }
     }
 
-    // 阶段 3：创建实体
+    // 阶段 3：创建实体（每个区一个平均高度，飞地各一根柱子，标签一个区一个）
     let minH = Infinity, maxH = -Infinity, sumH = 0, validCount = 0, skipped = 0
     for (let idx = 0; idx < districts.length; idx++) {
       const d = districts[idx]
@@ -661,14 +734,29 @@ async function toggleHeightVisual() {
       if (avgHeight < minH) minH = avgHeight
       if (avgHeight > maxH) maxH = avgHeight
       sumH += avgHeight; validCount++
-      const hEntity = v.entities.add({
-        name: d.name + ' (高度)',
-        polygon: { hierarchy: d.positions, height: avgHeight, extrudedHeight: avgHeight + Math.max(avgHeight * 2, 100), material: stableColor(d.adcode).withAlpha(0.6), outline: true, outlineColor: Cesium.Color.WHITE.withAlpha(0.4) },
+      const extrudedH = avgHeight + Math.max(avgHeight * 2, 100)
+      // 每个飞地一根柱子（共享同一个区平均高度）
+      for (const ring of d.rings) {
+        const hEntity = v.entities.add({
+          name: d.name + ' (高度)',
+          polygon: { hierarchy: ring, height: avgHeight, extrudedHeight: extrudedH, material: stableColor(d.adcode).withAlpha(0.6), outline: true, outlineColor: Cesium.Color.WHITE.withAlpha(0.4) },
+        })
+        heightEntities.push(hEntity)
+      }
+      // 标签优先用 GeoJSON 的 center（区中心点），否则退回所有飞地环的合并包围球中心；抬高到柱顶避免被地形遮挡
+      let labelPos
+      if (d.center) {
+        labelPos = Cesium.Cartesian3.fromDegrees(d.center[0], d.center[1], extrudedH)
+      } else {
+        const centerCarto = Cesium.Cartographic.fromCartesian(Cesium.BoundingSphere.fromPoints(d.rings.flat()).center)
+        labelPos = Cesium.Cartesian3.fromRadians(centerCarto.longitude, centerCarto.latitude, extrudedH)
+      }
+      const labelEntity = v.entities.add({
+        name: d.name + ' (高度标签)',
+        position: new Cesium.ConstantPositionProperty(labelPos),
         label: { text: `${avgHeight.toFixed(0)} 米`, font: '14px "Noto Sans SC", sans-serif', fillColor: Cesium.Color.WHITE, outlineColor: Cesium.Color.BLACK, outlineWidth: 2, style: Cesium.LabelStyle.FILL_AND_OUTLINE, pixelOffset: new Cesium.Cartesian2(0, -10) },
       })
-      const center = Cesium.BoundingSphere.fromPoints(d.positions).center
-      hEntity.position = new Cesium.ConstantPositionProperty(center)
-      heightEntities.push(hEntity)
+      heightEntities.push(labelEntity)
     }
     progressLabel.value = ''
     if (validCount === 0) {

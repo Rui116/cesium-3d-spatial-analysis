@@ -6,3 +6,6 @@ dist/
 .npm-temp-cache/
 skills-lock.json
 .agents/
+
+# 本地配置
+.claude/settings.local.json

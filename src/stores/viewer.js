@@ -1,9 +1,11 @@
 import { defineStore } from 'pinia'
-import { ref } from 'vue'
+import { ref, shallowRef, markRaw } from 'vue'
 
 export const useViewerStore = defineStore('viewer', () => {
   /* ---- 状态 ---- */
-  const viewer = ref(null)
+  // shallowRef：Cesium Viewer 是大型第三方对象，绝不能深度响应式代理
+  // （否则会触发地形异步加载的 TileAvailability 空指针，见 Cesium issue #11769）
+  const viewer = shallowRef(null)
   const isReady = ref(false)
   const isLoading = ref(false)
   const error = ref(null)
@@ -21,7 +23,7 @@ export const useViewerStore = defineStore('viewer', () => {
 
   /* ---- 操作方法 ---- */
   function setViewer(v) {
-    viewer.value = v
+    viewer.value = markRaw(v) // markRaw：即使被响应式包裹也永不代理，双保险
     isReady.value = true
   }
 

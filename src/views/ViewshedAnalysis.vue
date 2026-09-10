@@ -43,7 +43,7 @@
             <div>经度 {{ currentPos.lon.toFixed(6) }}°</div>
             <div>纬度 {{ currentPos.lat.toFixed(6) }}°</div>
             <div>海拔高度 {{ currentPos.height.toFixed(2) }} 米</div>
-            <div>离地高度 {{ (currentPos.agl ?? currentPos.height).toFixed(1) }} 米{{ currentPos.agl === 0 ? '（点选模式，贴在地表）' : '' }}</div>
+            <div>离地高度 {{ (currentPos.agl ?? currentPos.height).toFixed(1) }} 米{{ currentPos.agl === 0 ? '（点选模式）' : '' }}</div>
           </template>
         </el-alert>
 
@@ -184,7 +184,9 @@ function setObservationPoint(lon, lat, height, aglOverride) {
 /* ---- 可视域计算 ---- */
 
 const SAMPLES = 360           // 方向采样数
-const STEPS_PER_RAY = 10      // 每条射线上的插值步数
+const MAX_STEP = 50           // 每条射线最大采样间距（米），步数随半径自适应
+const MIN_STEPS = 10          // 每条射线最小步数下限
+const LOS_TOLERANCE = 1.5     // LOS 遮挡判定容差（米），吸收 DEM 高程噪声
 
 function onRadiusInput() {
   clearTimeout(radiusTimer)
@@ -229,18 +231,20 @@ async function calculateVisibility(position, r) {
   const tp = v.terrainProvider
   const obsCarto = ellipsoid.cartesianToCartographic(position)
   const obsHeight = obsCarto.height
+  // 步长自适应：半径越大步数越多，保证相邻采样点间距不超过 MAX_STEP
+  const steps = Math.max(MIN_STEPS, Math.ceil(r / MAX_STEP))
 
-  // ---- 1. 生成所有采样点（每条射线 STEPS_PER_RAY 个插值点） ----
+  // ---- 1. 生成所有采样点（每条射线 steps 个插值点） ----
   const allPositions = []   // Cartographic[]
   const rayMeta = []        // { startIdx, count } 每条射线在 allPositions 中的区间
 
   for (let i = 0; i < SAMPLES; i++) {
     if (cancelled) break
     const angle = (i / SAMPLES) * Math.PI * 2
-    rayMeta.push({ startIdx: allPositions.length, count: STEPS_PER_RAY, angle })
+    rayMeta.push({ startIdx: allPositions.length, count: steps, angle })
 
-    for (let s = 1; s <= STEPS_PER_RAY; s++) {
-      const dist = (s / STEPS_PER_RAY) * r
+    for (let s = 1; s <= steps; s++) {
+      const dist = (s / steps) * r
       const target = geodesicTargetFast(ellipsoid, obsCarto, angle, dist)
       if (target) {
         allPositions.push(new Cesium.Cartographic(target.lon, target.lat, 0))
@@ -252,7 +256,7 @@ async function calculateVisibility(position, r) {
 
   if (cancelled) return []
 
-  // ---- 2. 批量采样地形高度（一次异步调用替代 SAMPLES × STEPS_PER_RAY 次 globe.pick） ----
+  // ---- 2. 批量采样地形高度（一次异步调用替代 SAMPLES × steps 次 globe.pick） ----
   let sampled = allPositions
   if (allPositions.length > 0 && !(tp instanceof Cesium.EllipsoidTerrainProvider)) {
     try {
@@ -285,7 +289,7 @@ async function calculateVisibility(position, r) {
       // LOS 从观察点高度线性渐变到目标点地形高度
       const losH = obsHeight + frac * (targetH - obsHeight)
 
-      if (terrainH > losH + 0.5) {
+      if (terrainH > losH + LOS_TOLERANCE) {
         blocked = true
         blockDist = dist
         break
@@ -295,7 +299,6 @@ async function calculateVisibility(position, r) {
     results.push({ angle, distance: blocked ? blockDist : r, visible: !blocked })
   }
 
-  results._vc = results.filter(p => p.visible).length
   return results
 }
 
@@ -352,10 +355,16 @@ function updateStatistics(grid, r) {
     return
   }
   const totalArea = Math.PI * r * r
-  const visibleCount = grid._vc || 0
+  // 扇区面积求和：每个方向可见扇区面积 = 0.5 · Δθ · dᵢ²，dᵢ 为该方向可见距离
+  // （全程可见 dᵢ=r；被遮挡方向 dᵢ=blockDist，遮挡点之前仍可见，不能按方向数简单占比）
+  const dTheta = (Math.PI * 2) / grid.length
+  let visibleArea = 0
+  for (const p of grid) {
+    visibleArea += 0.5 * dTheta * p.distance * p.distance
+  }
   analysisResult.value = {
-    visibleArea: `${((visibleCount / grid.length) * totalArea / 1e6).toFixed(3)} km²`,
-    visiblePercent: `${((visibleCount / grid.length) * 100).toFixed(1)}%`,
+    visibleArea: `${(visibleArea / 1e6).toFixed(3)} km²`,
+    visiblePercent: `${((visibleArea / totalArea) * 100).toFixed(1)}%`,
   }
 }
 
