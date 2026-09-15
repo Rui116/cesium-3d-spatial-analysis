@@ -71,7 +71,7 @@ export class CoordinateConverter {
   static #EE = 0.00669342162296594323
 
   static #transformLat(x, y) {
-    let ret = -100.0 + 2.0 * x + 3.0 * y + 0.2 * y * y + 0.1 * x * y
+    let ret = -100.0 + 2.0 * x + 3.0 * y + 0.2 * y * y + 0.1 * x * y + 0.2 * Math.sqrt(Math.abs(x))
     ret += (20.0 * Math.sin(6.0 * x * this.#PI) + 20.0 * Math.sin(2.0 * x * this.#PI)) * 2.0 / 3.0
     ret += (20.0 * Math.sin(y * this.#PI) + 40.0 * Math.sin(y / 3.0 * this.#PI)) * 2.0 / 3.0
     ret += (160.0 * Math.sin(y / 12.0 * this.#PI) + 320 * Math.sin(y * this.#PI / 30.0)) * 2.0 / 3.0
@@ -79,7 +79,7 @@ export class CoordinateConverter {
   }
 
   static #transformLng(x, y) {
-    let ret = 300.0 + x + 2.0 * y + 0.1 * x * x + 0.1 * x * y
+    let ret = 300.0 + x + 2.0 * y + 0.1 * x * x + 0.1 * x * y + 0.1 * Math.sqrt(Math.abs(x))
     ret += (20.0 * Math.sin(6.0 * x * this.#PI) + 20.0 * Math.sin(2.0 * x * this.#PI)) * 2.0 / 3.0
     ret += (20.0 * Math.sin(x * this.#PI) + 40.0 * Math.sin(x / 3.0 * this.#PI)) * 2.0 / 3.0
     ret += (150.0 * Math.sin(x / 12.0 * this.#PI) + 300.0 * Math.sin(x / 30.0 * this.#PI)) * 2.0 / 3.0
@@ -101,8 +101,9 @@ export class CoordinateConverter {
     const dLat = this.#transformLat(lng - 105.0, lat - 35.0)
     const dLng = this.#transformLng(lng - 105.0, lat - 35.0)
     const radLat = lat / 180.0 * this.#PI
-    const magic = Math.sin(radLat)
-    const sqrtMagic = Math.sqrt(1 - this.#EE * magic * magic)
+    let magic = Math.sin(radLat)
+    magic = 1 - this.#EE * magic * magic   // 1 - ee·sin²(lat)，非 sin(lat)
+    const sqrtMagic = Math.sqrt(magic)
     const newLat = lat + (dLat * 180.0) / (this.#A * (1 - this.#EE) / (magic * sqrtMagic) * this.#PI)
     const newLng = lng + (dLng * 180.0) / (this.#A / sqrtMagic * Math.cos(radLat) * this.#PI)
     return [newLng, newLat]
@@ -114,8 +115,9 @@ export class CoordinateConverter {
     const dLat = this.#transformLat(lng - 105.0, lat - 35.0)
     const dLng = this.#transformLng(lng - 105.0, lat - 35.0)
     const radLat = lat / 180.0 * this.#PI
-    const magic = Math.sin(radLat)
-    const sqrtMagic = Math.sqrt(1 - this.#EE * magic * magic)
+    let magic = Math.sin(radLat)
+    magic = 1 - this.#EE * magic * magic   // 1 - ee·sin²(lat)，非 sin(lat)
+    const sqrtMagic = Math.sqrt(magic)
     const newLat = lat + (dLat * 180.0) / (this.#A * (1 - this.#EE) / (magic * sqrtMagic) * this.#PI)
     const newLng = lng + (dLng * 180.0) / (this.#A / sqrtMagic * Math.cos(radLat) * this.#PI)
     return [lng * 2 - newLng, lat * 2 - newLat]

@@ -121,7 +121,21 @@ function setFromInput(type) {
   const lng = parseFloat(type === 'start' ? startLng.value : endLng.value)
   const lat = parseFloat(type === 'start' ? startLat.value : endLat.value)
   if (isNaN(lng) || isNaN(lat)) { setStatus('坐标无效', 'error'); return }
-  if (type === 'start') setStartPt(lng, lat); else setEndPt(lng, lat)
+  if (lng < -180 || lng > 180 || lat < -90 || lat > 90) { setStatus('坐标超出有效范围', 'error'); return }
+
+  // 手动输入按真实 WGS-84 坐标处理（不做 gcj02ToWgs84 预偏移，那是地图选点专用）。
+  // marker 需转换到视觉位置，才能在 GCJ-02 影像下与偏移后的路线/底图对齐。
+  const markerCoord = isGcj02Imagery.value
+    ? CoordinateConverter.wgs84ToGcj02(lng, lat)
+    : [lng, lat]
+
+  if (type === 'start') {
+    startPoint.value = [lng, lat]
+    updateMarker('start', markerCoord, '起点', cesiumHelpers.COLORS.CYAN)
+  } else {
+    endPoint.value = [lng, lat]
+    updateMarker('end', markerCoord, '终点', cesiumHelpers.COLORS.AMBER)
+  }
   setStatus(`${type === 'start' ? '起点' : '终点'}已设置`, 'success')
 }
 
@@ -208,6 +222,8 @@ async function calculateRoute() {
 }
 
 function clearAll() {
+  routeService.cancel()      // 取消进行中的请求，避免清除后路线又被渲染出来
+  computing.value = false    // 复位计算状态，避免按钮卡在「计算中…」
   const v = viewer.value
   if (v) {
     markers.forEach(m => { try { v.entities.remove(m.entity) } catch (_) {} })
