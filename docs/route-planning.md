@@ -69,7 +69,7 @@
 | 全 GCJ-02 | ❌（偏离点击） | ✅ | ✅ |
 | marker WGS-84 + 路线 GCJ-02 | ✅ | ❌ | ✅ |
 
-**决策**：优先级 = marker 精确 > marker↔路线相连 > 影像对齐。统一用 WGS-84。
+**决策**：检测当前底图坐标系（`isGcj02Imagery`）。GCJ-02 底图（高德/腾讯）下，选点坐标先 `gcj02ToWgs84` 预抵消（`RouteService` 还会 `wgs84ToGcj02`，避免二次转换），路线用 `keepGcj02` 保留 GCJ-02 坐标、marker 用原始拾取值——三者都落在 GCJ-02 影像的视觉坐标系上，同时对齐。标准 WGS-84 影像下则全走 WGS-84。
 
 ## 问题 8：边界情况
 

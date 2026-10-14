@@ -63,8 +63,8 @@
 **修复**：改用 `Cesium.sampleTerrainMostDetailed` 批量异步采样。
 
 ```
-旧：360 次 globe.pick（同步，阻塞主线程）
-新：1 次 sampleTerrainMostDetailed（3600 个点，异步）
+旧：逐点 globe.pick（同步，阻塞主线程）
+新：1 次 sampleTerrainMostDetailed（360 方向 × 自适应步数的点，异步）
 ```
 
 ## 问题 6：手动输入高度语义冲突
